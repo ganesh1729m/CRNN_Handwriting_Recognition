@@ -1,38 +1,28 @@
-# Python
+# Python cache
 __pycache__/
 *.py[cod]
-*.so
-*.egg
-*.egg-info/
-dist/
-build/
 
-# Virtual environment
-venv/
-env/
-*.env
-
-# Jupyter Notebook checkpoints
-.ipynb_checkpoints/
-
-# Django
-*.log
-*.pot
-*.pyc
+# Django database
 db.sqlite3
-media/
-staticfiles/
-*.pid
 
-# VS Code / IDE
+# Media uploads
+media/
+
+# Django migrations
+migrations/
+
+# Model weights/checkpoints
+*.h5
+*.pt
+*.pth
+*.ckpt
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE/OS files
 .vscode/
 .idea/
-
-# OS files
 .DS_Store
 Thumbs.db
-
-# Others
-*.tgz
-*.tar.gz
-*.zip
