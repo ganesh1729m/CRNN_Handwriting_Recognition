@@ -1,0 +1,20 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Login</title>
+  <style>
+    body { font-family: system-ui; margin:2rem; }
+    form { max-width:300px; margin:auto; padding:1rem; border:1px solid #ccc; }
+    input { display:block; width:100%; margin:0.5rem 0; padding:0.5rem; }
+    button { padding:0.5rem 1rem; }
+  </style>
+</head>
+<body>
+  <h2>Login</h2>
+  <form method="post">
+    {% csrf_token %}
+    {{ form.as_p }}
+    <button type="submit">Login</button>
+  </form>
+</body>
+</html>

@@ -1,0 +1,334 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Handwriting Recognition</title>
+  <style>
+    body {
+      font-family: system-ui, -apple-system, Segoe UI, Roboto, Arial, sans-serif;
+      margin: 2rem;
+    }
+    .section { margin-bottom: 1.5rem; }
+    canvas {
+      border: 2px solid #111;
+      background: #fff;
+      cursor: crosshair;
+    }
+    .hint {
+      color: #444;
+      font-size: 0.95rem;
+    }
+    .row {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      margin-top: 8px;
+      flex-wrap: wrap;
+    }
+    label { font-weight: 600; }
+    button, a.btn-link {
+      padding: 6px 12px;
+      cursor: pointer;
+      background: #3182ce;
+      color: #fff;
+      border: none;
+      border-radius: 4px;
+      text-decoration: none;
+    }
+    button:disabled { background: #999; cursor: not-allowed; }
+    button:hover:not(:disabled),
+    a.btn-link:hover { background: #2b6cb0; }
+    #gallery img {
+      border: 1px solid #ccc;
+      margin: 5px;
+      max-width: 150px;
+      display: block;
+    }
+    #gallery div {
+      margin: 8px;
+      display: inline-block;
+      text-align: center;
+    }
+    #canvasResult {
+      margin-top: 1rem;
+      font-size: 2rem;        /* make text large */
+      font-weight: bold;       /* emphasize */
+      color: #cea931;          /* nice green color */
+      padding: 12px;
+      border: 2px solid #3182ce;
+      border-radius: 8px;
+      background: #f0f8ff;    /* soft background for emphasis */
+      width: fit-content;
+      min-width: 200px;
+      text-align: center;
+      box-shadow: 0 2px 6px rgba(0,0,0,0.15);
+    }
+  </style>
+</head>
+
+<body>
+  <!-- Messages -->
+  {% if messages %}
+    <ul>
+      {% for message in messages %}
+        <li style="color: green;">{{ message }}</li>
+      {% endfor %}
+    </ul>
+  {% endif %}
+
+  <!-- Authentication -->
+  <div style="margin-bottom: 1rem;">
+    {% if user.is_authenticated %}
+      <p>
+        Welcome, {{ user.username }}!
+        <a class="btn-link" href="{% url 'logout' %}">Logout</a>
+      </p>
+    {% else %}
+      <a class="btn-link" href="{% url 'login' %}">Login</a>
+      <a class="btn-link" href="{% url 'register' %}">Register</a>
+    {% endif %}
+  </div>
+
+  <h1>Handwriting Recognition</h1>
+
+  <!-- Canvas Section -->
+  <div class="section">
+    <h2>Write on Canvas</h2>
+    <p class="hint">⚠️ Model trained on <b>ALL-CAPS</b> names, black ink on white. Write ALL-CAPS.</p>
+
+    <canvas id="drawCanvas" width="1024" height="256"></canvas>
+
+    <div class="row">
+      <button id="clearBtn">Clear</button>
+      <button id="eraseBtn">Erase</button>
+      <button id="drawBtn">Draw</button>
+      <button id="undoBtn">Undo</button>
+      <button id="redoBtn">Redo</button>
+      <button id="predictBtn">Predict</button>
+
+      {% if user.is_authenticated %}
+        <button id="saveBtn">Save</button>
+        <button id="reportBtn">Report</button>
+      {% else %}
+        <button id="saveBtn" disabled>Save (Login required)</button>
+        <button id="reportBtn" disabled>Report (Login required)</button>
+      {% endif %}
+
+      <label for="bw">Brush width</label>
+      <input id="bw" type="range" min="2" max="20" value="8" />
+      <span id="bwVal">8</span>
+    </div>
+
+    <div id="canvasResult" class="section"></div>
+  </div>
+
+  <!-- Gallery Section -->
+  <div class="section">
+    <h2>Saved Canvases (History)</h2>
+    <div id="gallery"></div>
+  </div>
+
+  <script>
+    // -----------------------------
+    // Canvas Setup
+    // -----------------------------
+    const canvas = document.getElementById("drawCanvas");
+    const ctx = canvas.getContext("2d");
+    ctx.fillStyle = "#fff";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.lineJoin = "round";
+    ctx.lineCap = "round";
+    ctx.strokeStyle = "#000";
+
+    let drawing = false;
+    let last = null;
+    let lineW = 8;
+    let erasing = false;
+    let undoStack = [];
+    let redoStack = [];
+    let lastSavedFilename = null; // for report
+
+    const IS_AUTH = {{ user.is_authenticated|yesno:"true,false" }};
+
+    // CSRF token
+    function getCookie(name) {
+      const value = `; ${document.cookie}`;
+      const parts = value.split(`; ${name}=`);
+      if (parts.length === 2) return parts.pop().split(";").shift();
+    }
+    const csrftoken = getCookie('csrftoken');
+
+    // Brush width control
+    const bw = document.getElementById("bw");
+    const bwVal = document.getElementById("bwVal");
+    bw.addEventListener("input", e => {
+      lineW = parseInt(e.target.value, 10);
+      bwVal.textContent = lineW;
+    });
+
+    // -----------------------------
+    // Drawing Functions
+    // -----------------------------
+    function saveState() {
+      undoStack.push(canvas.toDataURL());
+      if (undoStack.length > 50) undoStack.shift();
+    }
+
+    function restoreState(stackFrom, stackTo) {
+      if (stackFrom.length === 0) return;
+      stackTo.push(canvas.toDataURL());
+      const imgData = stackFrom.pop();
+      const img = new Image();
+      img.src = imgData;
+      img.onload = () => ctx.drawImage(img, 0, 0, canvas.width, canvas.height);
+    }
+
+    function getPos(e) {
+      if (e.touches && e.touches.length) {
+        const rect = canvas.getBoundingClientRect();
+        return { x: e.touches[0].clientX - rect.left, y: e.touches[0].clientY - rect.top };
+      }
+      return { x: e.offsetX, y: e.offsetY };
+    }
+
+    function startDraw(e) { drawing = true; last = getPos(e); saveState(); redoStack = []; }
+    function drawMove(e) {
+      if (!drawing) return;
+      const p = getPos(e);
+      ctx.beginPath();
+      ctx.lineWidth = lineW;
+      ctx.strokeStyle = erasing ? "#fff" : "#000";
+      ctx.moveTo(last.x, last.y);
+      ctx.lineTo(p.x, p.y);
+      ctx.stroke();
+      last = p;
+    }
+    function endDraw() { drawing = false; last = null; }
+
+    canvas.addEventListener("mousedown", startDraw);
+    canvas.addEventListener("mousemove", drawMove);
+    window.addEventListener("mouseup", endDraw);
+    canvas.addEventListener("touchstart", startDraw, { passive: true });
+    canvas.addEventListener("touchmove", drawMove, { passive: true });
+    window.addEventListener("touchend", endDraw);
+
+    // -----------------------------
+    // Button Handlers
+    // -----------------------------
+    document.getElementById("clearBtn").onclick = () => {
+      saveState();
+      ctx.fillStyle = "#fff";
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.fillStyle = "#000";
+      document.getElementById("canvasResult").innerText = "";
+      redoStack = [];
+      lastSavedFilename = null;
+    };
+
+    document.getElementById("eraseBtn").onclick = () => { erasing = true; };
+    document.getElementById("drawBtn").onclick = () => { erasing = false; };
+    document.getElementById("undoBtn").onclick = () => { restoreState(undoStack, redoStack); lastSavedFilename = null; };
+    document.getElementById("redoBtn").onclick = () => { restoreState(redoStack, undoStack); lastSavedFilename = null; };
+
+    // -----------------------------
+    // Predict Function
+    // -----------------------------
+    document.getElementById("predictBtn").onclick = async () => {
+      const smallCanvas = document.createElement("canvas");
+      smallCanvas.width = 256;
+      smallCanvas.height = 64;
+      const sctx = smallCanvas.getContext("2d");
+      sctx.fillStyle = "#fff";
+      sctx.fillRect(0, 0, 256, 64);
+      sctx.drawImage(canvas, 0, 0, 256, 64);
+
+      const dataURL = smallCanvas.toDataURL("image/png");
+      const res = await fetch("/upload_canvas/", {
+        method: "POST",
+        headers: { "Content-Type": "application/json", "X-CSRFToken": csrftoken },
+        body: JSON.stringify({ image: dataURL })
+      });
+
+      let text = "Prediction failed";
+      try {
+        const data = await res.json();
+        text = data.error ? `Error: ${data.error}` : `Prediction: ${data.prediction}`;
+      } catch (e) { text = "Prediction failed"; }
+
+      document.getElementById("canvasResult").innerText = text;
+    };
+
+    // -----------------------------
+    // Save Canvas
+    // -----------------------------
+    if (saveBtn && !saveBtn.disabled) {
+      saveBtn.onclick = async () => {
+        const dataURL = canvas.toDataURL("image/png");
+        const res = await fetch("/save_canvas/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRFToken": csrftoken },
+          body: JSON.stringify({ image: dataURL })
+        });
+        const data = await res.json();
+        if (data.success) {
+          lastSavedFilename = data.filename;
+          alert("Saved!");
+          loadGallery();
+        } else {
+          alert(data.error || "Save failed");
+        }
+      };
+    }
+
+    // -----------------------------
+    // Report Canvas
+    // -----------------------------
+    if (reportBtn && !reportBtn.disabled) {
+      reportBtn.onclick = async () => {
+        const label = prompt("Enter the correct label for this drawing:");
+        if (!label) return;
+        if (!lastSavedFilename) {
+          alert("Please click Save first, then Report.");
+          return;
+        }
+        const res = await fetch("/report_canvas/", {
+          method: "POST",
+          headers: { "Content-Type": "application/json", "X-CSRFToken": csrftoken },
+          body: JSON.stringify({ file: lastSavedFilename, label: label })
+        });
+        const data = await res.json();
+        alert(data.success ? `Reported with label: ${label.toUpperCase()}` : data.error || "Report failed");
+        loadGallery();
+      };
+    }
+
+    // -----------------------------
+    // Load Gallery
+    // -----------------------------
+    async function loadGallery() {
+      if (!IS_AUTH) {
+        document.getElementById("gallery").innerHTML = "<em>Login to see your saved canvases.</em>";
+        return;
+      }
+      try {
+        const res = await fetch("/gallery/");
+        const data = await res.json();
+        const div = document.getElementById("gallery");
+        div.innerHTML = "";
+        (data.items || []).forEach(it => {
+          div.innerHTML += `
+            <div>
+              <img src="${it.image}" />
+              <p>${it.prediction ? "Prediction: " + it.prediction : ""}</p>
+              <p>${it.correct_label ? "Reported label: " + it.correct_label : ""}</p>
+            </div>`;
+        });
+      } catch (e) {
+        console.error(e);
+      }
+    }
+
+    loadGallery(); // Initial gallery load
+  </script>
+</body>
+</html>
