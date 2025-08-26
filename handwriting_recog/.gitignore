@@ -1,0 +1,28 @@
+# Python cache
+__pycache__/
+*.py[cod]
+
+# Django database
+db.sqlite3
+
+# Media uploads
+media/
+
+# Django migrations
+migrations/
+
+# Model weights/checkpoints
+*.h5
+*.pt
+*.pth
+*.ckpt
+
+# Jupyter
+.ipynb_checkpoints/
+*.ipynb
+
+# IDE/OS files
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
