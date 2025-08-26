@@ -82,7 +82,7 @@ handwriting_recog/
 
 ## ⚡ Setup
 ```bash
-git clone <repo-url>
+git clone https://github.com/ganesh1729m/CRNN_Handwriting_Recognition.git
 cd handwriting-app
 pip install -r requirements.txt
 
